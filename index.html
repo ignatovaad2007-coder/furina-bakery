@@ -1,0 +1,1107 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Фуринина Кондитерская 🍰</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  background: #1a1a2e;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+canvas { display: block; margin: 0 auto; }
+</style>
+</head>
+<body>
+<canvas id="gc"></canvas>
+<script>
+// ============================================================
+//  🍰 ФУРИНИНА КОНДИТЕРСКАЯ v1.3
+// ============================================================
+
+const canvas = document.getElementById('gc');
+const ctx = canvas.getContext('2d');
+
+let W, H, SCALE;
+function resize() {
+  const ar = 9 / 16;
+  if (window.innerWidth / window.innerHeight < ar) {
+    W = window.innerWidth; H = W / ar;
+  } else {
+    H = window.innerHeight; W = H * ar;
+  }
+  canvas.width = W; canvas.height = H; SCALE = W / 420;
+}
+resize();
+window.addEventListener('resize', resize);
+
+function S(v) { return v * SCALE; }
+function rand(a, b) { return a + Math.random() * (b - a); }
+function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+const C = {
+  blue: '#4A90D9', darkBlue: '#1B2A4A', lightBlue: '#A8D8EA',
+  gold: '#FFD700', pink: '#FF6B9D', white: '#FFFFFF',
+  cream: '#FFF8F0', brown: '#8B5E3C', darkBrown: '#5C3A1E',
+  red: '#E74C3C', green: '#2ECC71', gray: '#95A5A6',
+  text: '#2C2C2C', textLight: '#7F8C8D',
+  furinaHair: '#3A3A6E', furinaSkin: '#FDEBD0',
+  furinaDress: '#4A6FA5',
+};
+
+// ============================================================
+//  🖼️ КАРТИНКА ФУРИНЫ
+// ============================================================
+let furinaImg = null;
+let furinaImgLoaded = false;
+(function(){
+  const img = new Image();
+  img.onload = () => { furinaImg = img; furinaImgLoaded = true; };
+  img.onerror = () => { furinaImgLoaded = false; };
+  img.src = 'furina.png';
+})();
+
+// ============================================================
+//  🔊 ЗВУКИ
+// ============================================================
+let audioCtx;
+function initAudio() { if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+function playTone(f, d, t='sine', v=0.15) {
+  if (!audioCtx) return;
+  try {
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = t; o.frequency.value = f; g.gain.value = v;
+    g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + d);
+    o.connect(g); g.connect(audioCtx.destination); o.start(); o.stop(audioCtx.currentTime + d);
+  } catch(e){}
+}
+function sfxTap(){ playTone(800,0.1,'sine',0.1); }
+function sfxGood(){ playTone(523,0.15); playTone(659,0.15); }
+function sfxPerfect(){ playTone(523,0.1); setTimeout(()=>playTone(659,0.1),80); setTimeout(()=>playTone(784,0.2),160); }
+function sfxFail(){ playTone(200,0.3,'sawtooth',0.08); }
+function sfxCoin(){ playTone(988,0.08); setTimeout(()=>playTone(1319,0.15),80); }
+function sfxClick(){ playTone(600,0.05,'square',0.05); }
+function sfxDoorBell(){ playTone(659,0.2); setTimeout(()=>playTone(784,0.2),150); setTimeout(()=>playTone(1047,0.3),300); }
+
+// ============================================================
+//  ДАННЫЕ
+// ============================================================
+const RECIPES = [
+  { name:'Мадлен', emoji:'🧁', price:30, difficulty:1,
+    steps:[{type:'tap',label:'Разбей яйца!',target:5,time:6},{type:'hold',label:'Замеси тесто!',duration:3,time:8},{type:'timing',label:'Достань из духовки!',time:7}]},
+  { name:'Круассан', emoji:'🥐', price:50, difficulty:2,
+    steps:[{type:'tap',label:'Добавь масло!',target:7,time:7},{type:'hold',label:'Раскатай тесто!',duration:3.5,time:9},{type:'timing',label:'Выпеки до корочки!',time:7}]},
+  { name:'Эклер', emoji:'🍫', price:70, difficulty:2,
+    steps:[{type:'tap',label:'Смешай ингредиенты!',target:8,time:7},{type:'hold',label:'Завари крем!',duration:4,time:9},{type:'timing',label:'Покрой глазурью!',time:6}]},
+  { name:'Торт «Фонтейн»', emoji:'🎂', price:120, difficulty:3,
+    steps:[{type:'tap',label:'Приготовь бисквит!',target:10,time:8},{type:'hold',label:'Взбей крем!',duration:4,time:10},{type:'timing',label:'Выпеки коржи!',time:6},{type:'tap',label:'Укрась торт!',target:8,time:7}]},
+  { name:'Макарун', emoji:'🍪', price:60, difficulty:2,
+    steps:[{type:'tap',label:'Просей муку!',target:6,time:6},{type:'hold',label:'Вымешай макаронаж!',duration:3.5,time:8},{type:'timing',label:'Достань из духовки!',time:7}]},
+  { name:'Крем-брюле', emoji:'🍮', price:80, difficulty:3,
+    steps:[{type:'tap',label:'Отдели желтки!',target:6,time:6},{type:'hold',label:'Нагрей сливки!',duration:4,time:9},{type:'timing',label:'Карамелизируй!',time:5}]},
+];
+
+const CLIENTS = [
+  { name:'Горожанин', emoji:'👤', patience:1.0, tip:1.0,
+    greetings:['Добрый день!','Мне вкусное!','Что свежее?'],
+    happy:['Спасибо, чудесно!','Вкуснотища!'], sad:['Ну... ладно.','Ожидал лучшего.']},
+  { name:'Навия', emoji:'👱‍♀️', patience:1.2, tip:1.5, isVIP:true, day:2,
+    greetings:['Фурина! Я голодна!','Макаруны! Нет, всё!'],
+    happy:['ТЫ ГЕНИЙ! 💛','Навия одобряет!'], sad:['Ну, я тебя люблю.']},
+  { name:'Нёвиллет', emoji:'🧑‍⚖️', patience:1.5, tip:2.0, isVIP:true, day:3,
+    greetings:['...Воду в красивой чашке.','Что-нибудь без вкуса.'],
+    happy:['...Приемлемо.','Почти как вода.'], sad:['Вернусь к воде.']},
+  { name:'Странник', emoji:'⭐', patience:1.3, tip:1.3, isVIP:true, day:4,
+    greetings:['Привет, Фурина!','Паймон передаёт привет!'],
+    happy:['Паймон бы оценила!','Спасибо!'], sad:['В следующий раз!']},
+  { name:'Лини', emoji:'🎩', patience:1.1, tip:1.2, isVIP:true, day:5,
+    greetings:['Фокус-покус!','Удиви меня!'],
+    happy:['Браво! Бис!','Волшебно!'], sad:['Трюк не удался...']},
+];
+
+const FURINA_QUOTES = {
+  start:['Сегодня мы покорим Фонтейн десертами!','Я, великая Фурина, буду готовить!','По местам! Начинаем!'],
+  cooking:['Аккуратнее!','Переборщила с сахаром... Нет!','Как оркестром дирижируй!','Аромат триумфа!','Не отвлекайся!','Мне нравится компания!'],
+  perfect:['ВЕЛИКОЛЕПНО!','Три звезды!','Браво! Бис!'],
+  good:['Неплохо!','Сойдёт. Видела хуже.'],
+  bad:['Авангардная кухня!','Крабалетта в шоке.','Не подавай Нёвиллету...'],
+  dayEnd:['Заслужила чай с макаронами!','Завтра будет лучше!','Ножки устали, но сердце поёт!'],
+};
+
+// ============================================================
+//  💾 СОХРАНЕНИЕ
+// ============================================================
+const SAVE_KEY = 'furina_bakery_save_v3';
+function saveGame(){
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify({
+    mora:game.mora, day:game.day, reputation:game.reputation,
+    totalServed:game.totalServed, ovenLevel:game.ovenLevel, decorLevel:game.decorLevel
+  })); } catch(e){}
+}
+function loadGame(){
+  try {
+    const d = JSON.parse(localStorage.getItem(SAVE_KEY));
+    if(!d) return false;
+    game.mora=d.mora??100; game.day=d.day??1; game.reputation=d.reputation??0;
+    game.totalServed=d.totalServed??0; game.ovenLevel=d.ovenLevel??1; game.decorLevel=d.decorLevel??1;
+    return true;
+  } catch(e){ return false; }
+}
+function resetSave(){
+  try{localStorage.removeItem(SAVE_KEY);}catch(e){}
+  game.mora=100;game.day=1;game.reputation=0;game.totalServed=0;game.ovenLevel=1;game.decorLevel=1;
+}
+
+// ============================================================
+//  СОСТОЯНИЕ
+// ============================================================
+const ST={MENU:0,DIALOG:1,PLAYING:2,DAY_RESULT:3,SHOP:4,TUTORIAL:5};
+
+let game = {
+  state:ST.MENU, mora:100, day:1, reputation:0, totalServed:0,
+  dayOrders:0, dayMaxOrders:3, dayEarnings:0, dayStars:0,
+  currentClient:null, currentRecipe:null, currentStep:0,
+  stepTimer:0, stepScore:0, orderTimer:0, orderMaxTime:30,
+  tapCount:0, holdProgress:0, holdActive:false,
+  timingPos:0, timingDir:1, timingHit:false,
+  dialogText:'', dialogQueue:[], dialogCallback:null,
+  helperCooldowns:[0,0,0],
+  furinaEmotion:'happy', particles:[], floatingTexts:[], shakeTimer:0,
+  ovenLevel:1, decorLevel:1, buttons:[], time:0,
+  cookingQuote:'', dayEndQuote:'', hasSave:false,
+  // Новое: анимация гостя
+  guestEnterAnim:0, guestVisible:false, guestEmoji:'',
+  // Новое: туториал
+  tutorialPage:0,
+  // Новое: показанный день на результате
+  completedDay:0,
+};
+
+// ============================================================
+//  РИСОВАНИЕ
+// ============================================================
+function drawRoundRect(x,y,w,h,r,fill,stroke){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y);
+  ctx.quadraticCurveTo(x+w,y,x+w,y+r); ctx.lineTo(x+w,y+h-r);
+  ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h); ctx.lineTo(x+r,y+h);
+  ctx.quadraticCurveTo(x,y+h,x,y+h-r); ctx.lineTo(x,y+r);
+  ctx.quadraticCurveTo(x,y,x+r,y); ctx.closePath();
+  if(fill){ctx.fillStyle=fill;ctx.fill();}
+  if(stroke){ctx.strokeStyle=stroke;ctx.lineWidth=S(2);ctx.stroke();}
+}
+function drawText(text,x,y,size,color,align='center',bold=false){
+  ctx.fillStyle=color;
+  ctx.font=`${bold?'bold ':''}${S(size)}px "Segoe UI",Arial,sans-serif`;
+  ctx.textAlign=align; ctx.textBaseline='middle';
+  ctx.fillText(text,x,y);
+}
+function drawTextWrap(text,x,y,maxW,size,color){
+  ctx.fillStyle=color;
+  ctx.font=`${S(size)}px "Segoe UI",Arial,sans-serif`;
+  ctx.textAlign='center'; ctx.textBaseline='top';
+  const words=text.split(' '); let line=''; let cy=y;
+  for(const w of words){
+    const t=line+w+' ';
+    if(ctx.measureText(t).width>maxW&&line){ctx.fillText(line.trim(),x,cy);line=w+' ';cy+=S(size*1.4);}
+    else line=t;
+  }
+  ctx.fillText(line.trim(),x,cy);
+}
+function drawButton(x,y,w,h,text,color,tc=C.white,emoji=''){
+  const b={x,y,w,h}; game.buttons.push(b);
+  drawRoundRect(x+S(2),y+S(3),w,h,S(12),'rgba(0,0,0,0.15)');
+  drawRoundRect(x,y,w,h,S(12),color);
+  drawText(emoji?`${emoji} ${text}`:text,x+w/2,y+h/2,14,tc,'center',true);
+  return b;
+}
+function hitTest(tx,ty,b){return tx>=b.x&&tx<=b.x+b.w&&ty>=b.y&&ty<=b.y+b.h;}
+
+// ============================================================
+//  🏠 ФОН КУХНИ (подробный)
+// ============================================================
+function drawKitchenBG(){
+  // Стена — обои с текстурой
+  const wallGrad = ctx.createLinearGradient(0,0,0,H*0.72);
+  wallGrad.addColorStop(0,'#FFF5E6');
+  wallGrad.addColorStop(0.3,'#FDE8D0');
+  wallGrad.addColorStop(1,'#F5D5B8');
+  ctx.fillStyle = wallGrad;
+  ctx.fillRect(0,0,W,H*0.72);
+
+  // Узор обоев (ромбики)
+  ctx.globalAlpha = 0.04;
+  ctx.fillStyle = '#8B5E3C';
+  for(let row=0; row<20; row++){
+    for(let col=0; col<12; col++){
+      const ox = col*S(38) + (row%2)*S(19);
+      const oy = row*S(38);
+      ctx.beginPath();
+      ctx.moveTo(ox,oy-S(8)); ctx.lineTo(ox+S(8),oy);
+      ctx.lineTo(ox,oy+S(8)); ctx.lineTo(ox-S(8),oy);
+      ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+
+  // Плинтус
+  ctx.fillStyle = '#A0724A';
+  ctx.fillRect(0,H*0.70,W,S(10));
+  ctx.fillStyle = '#8B5E3C';
+  ctx.fillRect(0,H*0.70,W,S(3));
+
+  // Пол — паркет
+  const floorGrad = ctx.createLinearGradient(0,H*0.72,0,H);
+  floorGrad.addColorStop(0,'#C8956C');
+  floorGrad.addColorStop(1,'#A0724A');
+  ctx.fillStyle = floorGrad;
+  ctx.fillRect(0,H*0.72,W,H*0.28);
+
+  // Линии паркета
+  ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+  ctx.lineWidth = S(1);
+  for(let i=0;i<10;i++){
+    const lx = i*S(48);
+    ctx.beginPath(); ctx.moveTo(lx,H*0.72); ctx.lineTo(lx,H); ctx.stroke();
+  }
+  for(let i=0;i<4;i++){
+    const ly = H*0.72 + i*S(30);
+    ctx.beginPath(); ctx.moveTo(0,ly); ctx.lineTo(W,ly); ctx.stroke();
+  }
+
+  // Окно (большое, со шторами)
+  const wx=W*0.55, wy=S(25), ww=W*0.38, wh=S(100);
+  // Рама
+  drawRoundRect(wx-S(5),wy-S(5),ww+S(10),wh+S(10),S(6),'#6B4226');
+  // Стекло — небо
+  const skyGrad = ctx.createLinearGradient(wx,wy,wx,wy+wh);
+  skyGrad.addColorStop(0,'#87CEEB');
+  skyGrad.addColorStop(1,'#B0E0FF');
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(wx,wy,ww,wh);
+  // Облака
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  const cloudX = wx + (Math.sin(game.time*0.3)+1)*ww*0.3;
+  ctx.beginPath(); ctx.arc(cloudX,wy+S(25),S(12),0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cloudX+S(15),wy+S(22),S(15),0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(cloudX+S(30),wy+S(25),S(10),0,Math.PI*2); ctx.fill();
+  // Солнце
+  ctx.fillStyle = '#FFD700';
+  ctx.beginPath(); ctx.arc(wx+ww-S(15),wy+S(18),S(10),0,Math.PI*2); ctx.fill();
+  // Перекрестие окна
+  ctx.strokeStyle = '#6B4226'; ctx.lineWidth = S(3);
+  ctx.beginPath(); ctx.moveTo(wx+ww/2,wy); ctx.lineTo(wx+ww/2,wy+wh); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(wx,wy+wh/2); ctx.lineTo(wx+ww,wy+wh/2); ctx.stroke();
+  // Шторы
+  ctx.fillStyle = 'rgba(74,111,165,0.3)';
+  ctx.fillRect(wx-S(8),wy-S(5),S(18),wh+S(10));
+  ctx.fillRect(wx+ww-S(10),wy-S(5),S(18),wh+S(10));
+  // Карниз
+  ctx.fillStyle = '#6B4226';
+  ctx.fillRect(wx-S(12),wy-S(10),ww+S(24),S(6));
+
+  // Полка на стене
+  ctx.fillStyle = '#8B5E3C';
+  ctx.fillRect(S(10),S(20),W*0.4,S(8));
+  // Предметы на полке
+  drawText('🧂',S(30),S(15),14,C.white);
+  drawText('🫙',S(65),S(15),14,C.white);
+  drawText('🍯',S(100),S(15),14,C.white);
+  drawText('📖',S(135),S(15),14,C.white);
+
+  // Вторая полка ниже
+  ctx.fillStyle = '#8B5E3C';
+  ctx.fillRect(S(10),S(55),S(90),S(6));
+  drawText('🫖',S(30),S(50),12,C.white);
+  drawText('☕',S(55),S(50),12,C.white);
+  drawText('🍰',S(80),S(50),12,C.white);
+
+  // Рабочий стол (прилавок)
+  const counterY = H*0.62;
+  const counterGrad = ctx.createLinearGradient(0,counterY,0,counterY+S(50));
+  counterGrad.addColorStop(0,'#DEB887');
+  counterGrad.addColorStop(0.3,'#D2A86E');
+  counterGrad.addColorStop(1,'#B8935A');
+  ctx.fillStyle = counterGrad;
+  ctx.fillRect(0,counterY,W,S(50));
+  // Край прилавка
+  ctx.fillStyle = '#A0724A';
+  ctx.fillRect(0,counterY,W,S(4));
+
+  // Дверь справа (откуда приходят гости)
+  const doorX = W*0.82, doorY = H*0.35, doorW = S(55), doorH = H*0.35;
+  drawRoundRect(doorX,doorY,doorW,doorH,S(4),'#6B4226','#5C3A1E');
+  // Ручка двери
+  ctx.fillStyle = C.gold;
+  ctx.beginPath(); ctx.arc(doorX+doorW-S(12),doorY+doorH/2,S(4),0,Math.PI*2); ctx.fill();
+  // Табличка
+  drawRoundRect(doorX+S(10),doorY+S(10),doorW-S(20),S(18),S(3),'#FFF8F0','#8B5E3C');
+  drawText('🔔',doorX+doorW/2,doorY+S(19),10,C.text);
+
+  // Лампа
+  ctx.fillStyle = '#FFD700';
+  ctx.beginPath();
+  ctx.moveTo(W/2-S(15),S(0));
+  ctx.lineTo(W/2+S(15),S(0));
+  ctx.lineTo(W/2+S(20),S(12));
+  ctx.lineTo(W/2-S(20),S(12));
+  ctx.fill();
+  // Свет от лампы
+  ctx.fillStyle = 'rgba(255,215,0,0.05)';
+  ctx.beginPath();
+  ctx.moveTo(W/2-S(20),S(12));
+  ctx.lineTo(W/2-S(80),H*0.6);
+  ctx.lineTo(W/2+S(80),H*0.6);
+  ctx.lineTo(W/2+S(20),S(12));
+  ctx.fill();
+}
+
+// ============================================================
+//  🖼️ РИСУЕМ ФУРИНУ
+// ============================================================
+function drawFurina(x,y,size,emotion){
+  const s = size * SCALE;
+  const bob = Math.sin(game.time*3)*s*0.02;
+  const dy = y + bob;
+
+  if(furinaImgLoaded && furinaImg){
+    const asp = furinaImg.width/furinaImg.height;
+    let dw,dh;
+    // Увеличенный размер картинки
+    dh = s * 1.2;
+    dw = dh * asp;
+    // Ограничим ширину
+    if(dw > s * 1.2){ dw = s * 1.2; dh = dw / asp; }
+
+    ctx.save();
+    if(emotion==='excited'){
+      const tilt = Math.sin(game.time*6)*0.05;
+      ctx.translate(x,dy); ctx.rotate(tilt);
+      ctx.drawImage(furinaImg,-dw/2,-dh/2,dw,dh);
+    } else if(emotion==='sad'){
+      ctx.translate(x,dy); ctx.rotate(-0.05); ctx.globalAlpha=0.85;
+      ctx.drawImage(furinaImg,-dw/2,-dh/2,dw,dh);
+    } else {
+      ctx.drawImage(furinaImg,x-dw/2,dy-dh/2,dw,dh);
+    }
+    ctx.restore();
+  } else {
+    drawFurinaFallback(x,dy,s,emotion);
+  }
+}
+
+function drawFurinaFallback(x,cy,s,em){
+  ctx.fillStyle=C.furinaDress;
+  ctx.beginPath(); ctx.ellipse(x,cy+s*0.35,s*0.25,s*0.3,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=C.furinaSkin;
+  ctx.beginPath(); ctx.arc(x,cy-s*0.1,s*0.18,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle=C.furinaHair;
+  ctx.beginPath(); ctx.arc(x,cy-s*0.15,s*0.19,Math.PI,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(x+s*0.15,cy-s*0.05,s*0.06,s*0.15,0.3,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(x-s*0.15,cy-s*0.05,s*0.06,s*0.15,-0.3,0,Math.PI*2); ctx.fill();
+  const ey=cy-s*0.1;
+  if(em==='happy'||em==='excited'){
+    ctx.strokeStyle=C.darkBlue;ctx.lineWidth=S(2);
+    ctx.beginPath();ctx.arc(x-s*0.06,ey,s*0.03,Math.PI,0);ctx.stroke();
+    ctx.beginPath();ctx.arc(x+s*0.06,ey,s*0.03,Math.PI,0);ctx.stroke();
+  } else if(em==='sad'){
+    ctx.fillStyle=C.darkBlue;
+    ctx.beginPath();ctx.arc(x-s*0.06,ey,s*0.025,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.arc(x+s*0.06,ey,s*0.025,0,Math.PI*2);ctx.fill();
+    ctx.fillStyle=C.lightBlue;
+    ctx.beginPath();ctx.arc(x+s*0.08,ey+s*0.04,s*0.012,0,Math.PI*2);ctx.fill();
+  } else {
+    ctx.fillStyle=C.darkBlue;
+    ctx.beginPath();ctx.arc(x-s*0.06,ey,s*0.025,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.arc(x+s*0.06,ey,s*0.025,0,Math.PI*2);ctx.fill();
+  }
+  const my=cy-s*0.03;
+  if(em==='happy'||em==='excited'){ctx.strokeStyle=C.pink;ctx.lineWidth=S(1.5);ctx.beginPath();ctx.arc(x,my,s*0.03,0,Math.PI);ctx.stroke();}
+  else if(em==='sad'){ctx.strokeStyle=C.pink;ctx.lineWidth=S(1.5);ctx.beginPath();ctx.arc(x,my+s*0.02,s*0.025,Math.PI,0);ctx.stroke();}
+  else{ctx.fillStyle=C.pink;ctx.beginPath();ctx.arc(x,my,s*0.015,0,Math.PI*2);ctx.fill();}
+  drawRoundRect(x-s*0.1,cy-s*0.35,s*0.2,s*0.1,S(3),C.darkBlue);
+  drawRoundRect(x-s*0.14,cy-s*0.26,s*0.28,s*0.04,S(2),C.darkBlue);
+  drawRoundRect(x-s*0.1,cy-s*0.28,s*0.2,s*0.025,S(1),C.lightBlue);
+  ctx.fillStyle=C.lightBlue;ctx.beginPath();ctx.arc(x,cy+s*0.25,s*0.04,0,Math.PI*2);ctx.fill();
+}
+
+// ============================================================
+//  ЧАСТИЦЫ
+// ============================================================
+function spawnParticles(x,y,color,n=8){
+  for(let i=0;i<n;i++) game.particles.push({x,y,vx:rand(-3,3),vy:rand(-5,-1),life:1,color,size:rand(2,5)});
+}
+function spawnFloatingText(x,y,text,color=C.gold){
+  game.floatingTexts.push({x,y,text,color,life:1.5});
+}
+function updateParticles(dt){
+  for(let i=game.particles.length-1;i>=0;i--){
+    const p=game.particles[i];p.x+=p.vx*dt*60;p.y+=p.vy*dt*60;p.vy+=2*dt;p.life-=dt*1.5;
+    if(p.life<=0)game.particles.splice(i,1);
+  }
+  for(let i=game.floatingTexts.length-1;i>=0;i--){
+    const f=game.floatingTexts[i];f.y-=dt*40;f.life-=dt;
+    if(f.life<=0)game.floatingTexts.splice(i,1);
+  }
+}
+function drawParticles(){
+  for(const p of game.particles){ctx.globalAlpha=p.life;ctx.fillStyle=p.color;ctx.beginPath();ctx.arc(p.x,p.y,S(p.size),0,Math.PI*2);ctx.fill();}
+  ctx.globalAlpha=1;
+  for(const f of game.floatingTexts){ctx.globalAlpha=Math.min(1,f.life);drawText(f.text,f.x,f.y,18,f.color,'center',true);}
+  ctx.globalAlpha=1;
+}
+
+// ============================================================
+//  АНИМАЦИЯ ГОСТЯ
+// ============================================================
+function drawGuest(){
+  if(!game.guestVisible || !game.guestEmoji) return;
+  const anim = Math.min(game.guestEnterAnim, 1);
+  // Гость заходит справа
+  const startX = W + S(30);
+  const endX = W*0.75;
+  const gx = startX + (endX - startX) * easeOutBack(anim);
+  const gy = H*0.52;
+  // Тело гостя (силуэт)
+  ctx.globalAlpha = anim;
+  drawText(game.guestEmoji, gx, gy, 40, C.white);
+  // Маленький бабл если VIP
+  if(game.currentClient && game.currentClient.isVIP && anim > 0.8){
+    drawText('⭐VIP', gx, gy - S(30), 10, C.gold, 'center', true);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function easeOutBack(t){
+  const c1=1.70158, c3=c1+1;
+  return 1+c3*Math.pow(t-1,3)+c1*Math.pow(t-1,2);
+}
+
+// ============================================================
+//  📚 ТУТОРИАЛ (подробный)
+// ============================================================
+const TUTORIAL_PAGES = [
+  {
+    title: '🍰 Добро пожаловать!',
+    lines: [
+      'Фурина открыла свою кондитерскую',
+      'в Фонтейне! Помоги ей готовить',
+      'десерты и обслуживать клиентов.',
+      '',
+      'Каждый день приходят гости.',
+      'Выполняй заказы, зарабатывай мору!',
+    ]
+  },
+  {
+    title: '🎮 Мини-игры готовки',
+    lines: [
+      '👆 ТАП — быстро нажимай на экран',
+      '   чтобы набрать нужное количество',
+      '',
+      '✊ УДЕРЖАНИЕ — зажми и держи палец,',
+      '   пока полоска не заполнится',
+      '',
+      '🎯 ТАЙМИНГ — нажми, когда бегунок',
+      '   окажется в зелёной зоне',
+    ]
+  },
+  {
+    title: '🦀 Салонные существа',
+    lines: [
+      '🦀 Крабалетта — автоматически',
+      '   добавляет +3 к счётчику тапов',
+      '',
+      '🐴 Шевальмарен — добавляет +5',
+      '   секунд к таймеру заказа',
+      '',
+      '🐙 Ушер — заполняет 40%',
+      '   полоски удержания',
+      '',
+      'Кулдаун каждого: 15 секунд',
+    ]
+  },
+  {
+    title: '👥 Гости и дни',
+    lines: [
+      'День 1: 👤 Горожане, простые блюда',
+      'День 2: 👱‍♀️ Навия (VIP, +чаевые)',
+      'День 3: 🧑‍⚖️ Нёвиллет (VIP)',
+      'День 4: ⭐ Странник (VIP)',
+      'День 5+: 🎩 Лини (VIP)',
+      '',
+      'VIP-клиенты дают больше чаевых!',
+      'Каждый день заказов всё больше.',
+    ]
+  },
+  {
+    title: '⭐ Оценки и магазин',
+    lines: [
+      'За каждый заказ — от 1 до 3 звёзд.',
+      'Чем быстрее готовишь — тем лучше!',
+      '',
+      '🛒 В магазине можно купить:',
+      '🔥 Духовку — больше заказов в день',
+      '🎀 Декор — больше репутации',
+      '📖 Рецепт — новые десерты',
+      '',
+      '💾 Прогресс сохраняется автоматически!',
+    ]
+  },
+];
+
+function renderTutorial(){
+  ctx.fillStyle='rgba(0,0,0,0.7)';
+  ctx.fillRect(0,0,W,H);
+
+  const page = TUTORIAL_PAGES[game.tutorialPage];
+  const bx=S(15),by=H*0.08,bw=W-S(30),bh=H*0.75;
+  drawRoundRect(bx,by,bw,bh,S(16),'rgba(27,42,74,0.95)',C.lightBlue);
+
+  // Заголовок
+  drawText(page.title,W/2,by+S(30),20,C.gold,'center',true);
+
+  // Содержимое
+  for(let i=0;i<page.lines.length;i++){
+    drawText(page.lines[i],W/2,by+S(65)+i*S(22),12,C.white);
+  }
+
+  // Индикатор страниц
+  const dots = TUTORIAL_PAGES.length;
+  for(let i=0;i<dots;i++){
+    ctx.fillStyle = i===game.tutorialPage ? C.gold : 'rgba(255,255,255,0.3)';
+    ctx.beginPath(); ctx.arc(W/2+(i-dots/2+0.5)*S(18),by+bh-S(40),S(4),0,Math.PI*2); ctx.fill();
+  }
+
+  // Счётчик
+  drawText(`${game.tutorialPage+1}/${dots}`,W/2,by+bh-S(20),10,C.textLight);
+
+  game.buttons=[];
+  if(game.tutorialPage < TUTORIAL_PAGES.length - 1){
+    drawButton(W*0.55,H*0.86,W*0.35,S(45),'Далее',C.blue,C.white,'▶');
+  } else {
+    drawButton(W*0.55,H*0.86,W*0.35,S(45),'Играть!',C.green,C.white,'🍰');
+  }
+  if(game.tutorialPage > 0){
+    drawButton(W*0.1,H*0.86,W*0.35,S(45),'Назад',C.gray,C.white,'◀');
+  }
+}
+
+function handleTutorial(tx,ty){
+  // Кнопка "Далее" / "Играть"
+  for(const b of game.buttons){
+    if(hitTest(tx,ty,b)){
+      sfxClick();
+      // Определяем какая кнопка
+      if(b.x > W*0.4){ // правая кнопка
+        if(game.tutorialPage < TUTORIAL_PAGES.length-1) game.tutorialPage++;
+        else game.state = ST.MENU;
+      } else { // левая кнопка (назад)
+        if(game.tutorialPage > 0) game.tutorialPage--;
+      }
+      return;
+    }
+  }
+}
+
+// ============================================================
+//  ЭКРАНЫ
+// ============================================================
+
+// --- МЕНЮ ---
+function renderMenu(){
+  const grad=ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'#1B2A4A');grad.addColorStop(0.5,'#2C4A7C');grad.addColorStop(1,'#4A90D9');
+  ctx.fillStyle=grad; ctx.fillRect(0,0,W,H);
+
+  // Пузырьки
+  for(let i=0;i<15;i++){
+    const bx=(Math.sin(game.time*0.5+i*2.1)*0.3+0.5)*W;
+    const by=((game.time*0.05+i*0.15)%1.2-0.1)*H;
+    ctx.globalAlpha=0.12;ctx.fillStyle=C.lightBlue;
+    ctx.beginPath();ctx.arc(bx,by,S(8+i*2),0,Math.PI*2);ctx.fill();
+  }
+  ctx.globalAlpha=1;
+
+  // Фурина — крупнее в меню
+  drawFurina(W/2,H*0.35,160,'excited');
+
+  drawText('🍰',W/2,H*0.06,40,C.white);
+  drawText('Фуринина',W/2,H*0.13,30,C.gold,'center',true);
+  drawText('Кондитерская',W/2,H*0.18,26,C.white,'center',true);
+
+  // Статистика
+  if(game.hasSave && game.day>1){
+    drawRoundRect(W*0.08,H*0.54,W*0.84,S(50),S(10),'rgba(255,255,255,0.1)',C.lightBlue);
+    drawText(`💾 День ${game.day} | 💰 ${game.mora} моры`,W/2,H*0.54+S(15),12,C.lightBlue);
+    drawText(`⭐ ${game.reputation} репутации | 👥 ${game.totalServed} обслужено`,W/2,H*0.54+S(35),11,C.textLight);
+  }
+
+  game.buttons=[];
+  const lbl=(game.hasSave&&game.day>1)?'Продолжить':'Начать игру';
+  drawButton(W*0.12,H*0.64,W*0.76,S(50),lbl,C.blue,C.white,'▶');
+  drawButton(W*0.12,H*0.74,W*0.76,S(50),'Как играть',C.darkBlue,C.white,'📖');
+
+  if(game.hasSave && game.day>1){
+    drawButton(W*0.12,H*0.84,W*0.76,S(42),'Сбросить прогресс',C.red,C.white,'🗑');
+  }
+
+  drawText('v1.3 — Fan Game',W/2,H*0.96,10,'rgba(255,255,255,0.4)');
+}
+
+function handleMenu(tx,ty){
+  if(game.buttons[0]&&hitTest(tx,ty,game.buttons[0])){sfxClick();startDay();}
+  if(game.buttons[1]&&hitTest(tx,ty,game.buttons[1])){
+    sfxClick(); game.tutorialPage=0; game.state=ST.TUTORIAL;
+  }
+  const rb=game.buttons[2];
+  if(rb&&hitTest(tx,ty,rb)){
+    sfxClick();
+    showDialog(['🗑 Прогресс сброшен!','Начинаем заново!'],()=>{resetSave();game.hasSave=false;game.state=ST.MENU;});
+  }
+}
+
+// --- ДИАЛОГ ---
+function showDialog(lines,cb){
+  game.state=ST.DIALOG; game.dialogQueue=[...lines];
+  game.dialogText=game.dialogQueue.shift(); game.dialogCallback=cb;
+}
+function renderDialog(){
+  ctx.fillStyle='rgba(0,0,0,0.5)';ctx.fillRect(0,0,W,H);
+  const bx=S(15),by=H*0.52,bw=W-S(30),bh=H*0.38;
+  drawRoundRect(bx,by,bw,bh,S(16),'rgba(27,42,74,0.95)',C.lightBlue);
+
+  // Фурина в диалоге — побольше
+  drawFurina(bx+S(50),by+S(55),60,'happy');
+
+  drawText('Фурина',bx+S(100),by+S(22),14,C.gold,'left',true);
+  drawTextWrap(game.dialogText,W/2,by+S(70),bw-S(30),14,C.white);
+
+  const blink=Math.sin(game.time*4)>0;
+  if(blink) drawText('▼ Нажми далее',W/2,by+bh-S(18),11,C.lightBlue);
+}
+function handleDialog(){
+  sfxTap();
+  if(game.dialogQueue.length>0) game.dialogText=game.dialogQueue.shift();
+  else if(game.dialogCallback) game.dialogCallback();
+}
+
+// --- ДЕНЬ ---
+function startDay(){
+  game.dayMaxOrders=Math.min(3+Math.floor(game.day/2),8);
+  game.dayOrders=0;game.dayEarnings=0;game.dayStars=0;
+  game.helperCooldowns=[0,0,0];
+  game.dayEndQuote=pick(FURINA_QUOTES.dayEnd);
+  game.guestVisible=false;game.guestEnterAnim=0;
+
+  // Какие гости доступны сегодня
+  const newClients = CLIENTS.filter(c=>c.day && c.day===game.day);
+  let introLines = [`☀️ День ${game.day}`,pick(FURINA_QUOTES.start),`Сегодня ждём ${game.dayMaxOrders} клиентов!`];
+
+  if(newClients.length>0){
+    for(const nc of newClients){
+      introLines.push(`🆕 Новый гость: ${nc.emoji} ${nc.name}! (чаевые x${nc.tip})`);
+    }
+  }
+
+  // Подсказка о разблокированных рецептах
+  const availDiff = Math.min(1+Math.floor(game.day/2),3);
+  const newRecipes = RECIPES.filter(r=>r.difficulty===availDiff && availDiff > 1);
+  if(game.day===3 && newRecipes.length>0){
+    introLines.push('🆕 Новые рецепты: '+newRecipes.map(r=>r.emoji+r.name).join(', '));
+  }
+  if(game.day===5){
+    introLines.push('🆕 Все рецепты разблокированы!');
+  }
+
+  introLines.push('Вперёд!');
+  showDialog(introLines,()=>{nextOrder();});
+}
+
+function nextOrder(){
+  if(game.dayOrders>=game.dayMaxOrders){endDay();return;}
+
+  let pool=[CLIENTS[0]];
+  for(const c of CLIENTS) if(c.day && game.day>=c.day) pool.push(c);
+  game.currentClient=pick(pool);
+  let rPool=RECIPES.filter(r=>r.difficulty<=Math.min(1+Math.floor(game.day/2),3));
+  game.currentRecipe=pick(rPool);
+  game.currentStep=0;
+  game.orderTimer=game.currentRecipe.steps.length*12*game.currentClient.patience;
+  game.orderMaxTime=game.orderTimer;
+  game.dayOrders++;
+
+  // Анимация входа гостя
+  game.guestEmoji=game.currentClient.emoji;
+  game.guestVisible=true;
+  game.guestEnterAnim=0;
+  sfxDoorBell();
+
+  showDialog([
+    `🔔 Гость #${game.dayOrders}!`,
+    `${game.currentClient.emoji} ${game.currentClient.name}: ${pick(game.currentClient.greetings)}`,
+    `Заказ: ${game.currentRecipe.emoji} ${game.currentRecipe.name}!`,
+  ],()=>{startStep();});
+}
+
+function startStep(){
+  if(game.currentStep>=game.currentRecipe.steps.length){finishOrder();return;}
+  const step=game.currentRecipe.steps[game.currentStep];
+  game.stepTimer=step.time;game.stepScore=0;game.tapCount=0;
+  game.holdProgress=0;game.holdActive=false;
+  game.timingPos=0;game.timingDir=1;game.timingHit=false;
+  game.state=ST.PLAYING;game.furinaEmotion='happy';
+  game.cookingQuote=pick(FURINA_QUOTES.cooking);
+}
+
+function finishOrder(){
+  const pct=game.orderTimer/game.orderMaxTime;
+  let stars=1;if(pct>0.5)stars=2;if(pct>0.75)stars=3;
+  const earn=Math.floor(game.currentRecipe.price*game.currentClient.tip*(stars/2));
+  game.mora+=earn;game.dayEarnings+=earn;game.dayStars+=stars;
+  game.totalServed++;game.reputation+=stars;
+  saveGame();
+  sfxCoin();spawnParticles(W/2,H*0.4,C.gold,15);
+  spawnFloatingText(W/2,H*0.35,`+${earn} 💰`,C.gold);
+  const ss='⭐'.repeat(stars)+'☆'.repeat(3-stars);
+  const q=stars===3?pick(FURINA_QUOTES.perfect):stars===2?pick(FURINA_QUOTES.good):pick(FURINA_QUOTES.bad);
+  const cq=stars>=2?pick(game.currentClient.happy):pick(game.currentClient.sad);
+  game.furinaEmotion=stars>=2?'excited':'sad';
+  game.guestVisible=false;
+  showDialog([ss,`${game.currentClient.emoji} ${cq}`,`Фурина: ${q}`,`+${earn} моры!`],()=>{nextOrder();});
+}
+
+function endDay(){
+  game.completedDay = game.day;
+  game.day++;
+  game.state=ST.DAY_RESULT;game.furinaEmotion='happy';
+  saveGame();game.hasSave=true;
+}
+
+// --- РЕЗУЛЬТАТ ДНЯ ---
+function renderDayResult(){
+  const grad=ctx.createLinearGradient(0,0,0,H);
+  grad.addColorStop(0,'#1B2A4A');grad.addColorStop(1,'#2C4A7C');
+  ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
+
+  // Звёзды-декор
+  for(let i=0;i<20;i++){
+    const sx=(Math.sin(i*1.7+game.time*0.2)*0.4+0.5)*W;
+    const sy=(Math.cos(i*2.3+game.time*0.1)*0.15+0.05)*H;
+    ctx.globalAlpha=0.3+Math.sin(game.time*2+i)*0.2;
+    drawText('✨',sx,sy,6+i%4,C.gold);
+  }
+  ctx.globalAlpha=1;
+
+  drawText(`🌙 День ${game.completedDay} завершён!`,W/2,H*0.08,22,C.gold,'center',true);
+  drawFurina(W/2,H*0.26,100,game.furinaEmotion);
+
+  const bx=S(20),by=H*0.42,bw=W-S(40),bh=H*0.3;
+  drawRoundRect(bx,by,bw,bh,S(16),'rgba(255,255,255,0.1)',C.lightBlue);
+
+  drawText(`📋 Заказов: ${game.dayOrders}`,W/2,by+S(30),14,C.white,'center',true);
+  drawText(`💰 Заработано: ${game.dayEarnings} моры`,W/2,by+S(55),14,C.gold,'center',true);
+  drawText(`⭐ Звёзд: ${game.dayStars}`,W/2,by+S(80),14,C.gold,'center',true);
+  drawText(`💎 Всего: ${game.mora} моры`,W/2,by+S(105),14,C.lightBlue,'center',true);
+  drawText(`👥 Всего обслужено: ${game.totalServed}`,W/2,by+S(125),11,C.textLight,'center');
+
+  drawText(game.dayEndQuote,W/2,H*0.76,12,C.lightBlue);
+  drawText('💾 Прогресс сохранён',W/2,H*0.79,10,C.green);
+
+  game.buttons=[];
+  drawButton(W*0.05,H*0.84,W*0.43,S(50),'Магазин',C.brown,C.white,'🛒');
+  drawButton(W*0.52,H*0.84,W*0.43,S(50),'День '+game.day,C.blue,C.white,'☀️');
+}
+
+function handleDayResult(tx,ty){
+  if(game.buttons[0]&&hitTest(tx,ty,game.buttons[0])){sfxClick();game.state=ST.SHOP;}
+  if(game.buttons[1]&&hitTest(tx,ty,game.buttons[1])){sfxClick();startDay();}
+}
+
+// --- МАГАЗИН ---
+function renderShop(){
+  ctx.fillStyle=C.cream;ctx.fillRect(0,0,W,H);
+  drawText('🛒 Магазин',W/2,S(30),22,C.darkBlue,'center',true);
+  drawText(`💰 ${game.mora} моры`,W/2,S(55),14,C.gold,'center',true);
+  game.buttons=[];
+  const items=[
+    {name:'Духовка',desc:`+1 заказ/день (ур.${game.ovenLevel})`,cost:200*game.ovenLevel,emoji:'🔥'},
+    {name:'Декор',desc:`+5 репутация (ур.${game.decorLevel})`,cost:150*game.decorLevel,emoji:'🎀'},
+    {name:'Рецепт',desc:'Новый десерт!',cost:300,emoji:'📖'},
+  ];
+  for(let i=0;i<items.length;i++){
+    const iy=S(80)+i*S(100);const it=items[i];
+    drawRoundRect(S(15),iy,W-S(30),S(85),S(12),C.white,C.lightBlue);
+    drawText(`${it.emoji} ${it.name}`,W/2,iy+S(20),14,C.darkBlue,'center',true);
+    drawText(it.desc,W/2,iy+S(40),11,C.textLight);
+    drawButton(W*0.2,iy+S(52),W*0.6,S(28),`${it.cost} 💰`,game.mora>=it.cost?C.green:C.gray);
+  }
+  drawButton(W*0.15,H*0.88,W*0.7,S(48),'Назад',C.darkBlue,C.white,'↩');
+}
+
+function handleShop(tx,ty){
+  const costs=[200*game.ovenLevel,150*game.decorLevel,300];
+  for(let i=0;i<3;i++){
+    if(game.buttons[i]&&hitTest(tx,ty,game.buttons[i])){
+      if(game.mora>=costs[i]){
+        game.mora-=costs[i];sfxCoin();
+        if(i===0)game.ovenLevel++;
+        if(i===1){game.decorLevel++;game.reputation+=5;}
+        if(i===2)sfxGood();
+        spawnParticles(W/2,H*0.5,C.gold,10);saveGame();
+      }else sfxFail();
+    }
+  }
+  if(game.buttons[3]&&hitTest(tx,ty,game.buttons[3])){sfxClick();game.state=ST.DAY_RESULT;}
+}
+
+// --- ГЕЙМПЛЕЙ ---
+function renderPlaying(){
+  // Фон кухни
+  drawKitchenBG();
+
+  // Гость (анимация)
+  drawGuest();
+
+  // Панель заказа (сверху)
+  drawRoundRect(S(8),S(8),W-S(16),S(80),S(12),'rgba(27,42,74,0.92)');
+  drawText(`${game.currentClient.emoji} ${game.currentClient.name}`,S(20),S(28),13,C.white,'left',true);
+  if(game.currentClient.isVIP) drawText('⭐VIP',S(20)+ctx.measureText(game.currentClient.name).width+S(45),S(28),9,C.gold,'left');
+  drawText(`${game.currentRecipe.emoji} ${game.currentRecipe.name}`,S(20),S(50),12,C.lightBlue,'left');
+  drawText(`Заказ ${game.dayOrders}/${game.dayMaxOrders}`,S(20),S(70),10,C.textLight,'left');
+
+  // Таймер
+  const tp=game.orderTimer/game.orderMaxTime;
+  const tc=tp>0.5?C.green:tp>0.25?C.gold:C.red;
+  drawRoundRect(W*0.5,S(18),W*0.44,S(14),S(5),'rgba(0,0,0,0.3)');
+  if(tp>0)drawRoundRect(W*0.5,S(18),W*0.44*tp,S(14),S(5),tc);
+  drawText(`⏰ ${Math.ceil(game.orderTimer)}с`,W*0.72,S(48),11,tc,'center',true);
+  drawText(`💰 ${game.mora}`,W*0.72,S(70),10,C.gold,'center');
+
+  // Фурина (слева, крупнее)
+  drawFurina(S(60),H*0.48,90,game.furinaEmotion);
+
+  // Облачко Фурины
+  const step=game.currentRecipe.steps[game.currentStep];
+  if(step && game.stepTimer > step.time-2.5){
+    drawRoundRect(S(5),H*0.28,W*0.5,S(45),S(10),'rgba(255,255,255,0.92)',C.lightBlue);
+    // Хвостик облачка
+    ctx.fillStyle='rgba(255,255,255,0.92)';
+    ctx.beginPath();
+    ctx.moveTo(S(40),H*0.28+S(45));
+    ctx.lineTo(S(50),H*0.28+S(55));
+    ctx.lineTo(S(60),H*0.28+S(45));
+    ctx.fill();
+    drawText(game.cookingQuote,S(10)+W*0.25,H*0.28+S(22),10,C.darkBlue);
+  }
+
+  // Шаг
+  drawText(`Шаг ${game.currentStep+1}/${game.currentRecipe.steps.length}`,W/2,H*0.22,11,C.textLight);
+
+  // Мини-игра
+  const ga={x:W*0.12,y:H*0.26,w:W*0.76,h:H*0.34};
+  drawRoundRect(ga.x,ga.y,ga.w,ga.h,S(16),'rgba(255,255,255,0.88)',C.blue);
+
+  if(step){
+    drawText(step.label,W/2,ga.y+S(22),15,C.darkBlue,'center',true);
+    const sp=game.stepTimer/step.time;
+    drawRoundRect(ga.x+S(10),ga.y+S(38),ga.w-S(20),S(8),S(4),'#ddd');
+    if(sp>0)drawRoundRect(ga.x+S(10),ga.y+S(38),(ga.w-S(20))*sp,S(8),S(4),sp>0.3?C.blue:C.red);
+    if(step.type==='tap')renderTapGame(ga,step);
+    else if(step.type==='hold')renderHoldGame(ga,step);
+    else if(step.type==='timing')renderTimingGame(ga,step);
+  }
+
+  // Помощники (на прилавке)
+  const hy=H*0.68;
+  for(let i=0;i<3;i++){
+    const hx=S(10)+i*(W/3);
+    const hw=W/3-S(8);
+    const cd=game.helperCooldowns[i];
+    const rdy=cd<=0;
+    drawRoundRect(hx,hy,hw,S(55),S(10),rdy?C.blue:C.gray);
+    drawText(['🦀','🐴','🐙'][i],hx+hw/2,hy+S(15),16,C.white);
+    drawText(['Крабалетта','Шевальмарен','Ушер'][i],hx+hw/2,hy+S(33),8,C.white,'center',true);
+    drawText(rdy?'Готов!':`${Math.ceil(cd)}с`,hx+hw/2,hy+S(46),9,rdy?C.gold:C.textLight);
+  }
+}
+
+function renderTapGame(a,s){
+  const pr=game.tapCount/s.target;
+  const cx=a.x+a.w/2,cy=a.y+a.h*0.6;
+  const pu=1+Math.sin(game.time*8)*0.05;
+  const r=S(40)*pu;
+  ctx.fillStyle='rgba(74,144,217,0.2)';ctx.beginPath();ctx.arc(cx,cy,r*1.3,0,Math.PI*2);ctx.fill();
+  ctx.fillStyle=C.blue;ctx.beginPath();ctx.arc(cx,cy,r,0,Math.PI*2);ctx.fill();
+  drawText('👆',cx,cy,28,C.white);
+  drawText(`${game.tapCount}/${s.target}`,cx,cy+S(55),16,C.darkBlue,'center',true);
+  drawRoundRect(a.x+S(20),a.y+a.h-S(22),a.w-S(40),S(12),S(6),'#ddd');
+  if(pr>0)drawRoundRect(a.x+S(20),a.y+a.h-S(22),(a.w-S(40))*Math.min(pr,1),S(12),S(6),C.green);
+}
+
+function renderHoldGame(a,s){
+  const cx=a.x+a.w/2,cy=a.y+a.h*0.6;
+  const th=S(110),fh=th*game.holdProgress;
+  drawRoundRect(cx-S(30),cy-th/2,S(60),th,S(10),'#ddd',C.blue);
+  if(fh>0)drawRoundRect(cx-S(30),cy+th/2-fh,S(60),fh,S(10),C.green);
+  drawText(game.holdActive?'🔥 Держи!':'👆 Удерживай!',cx,cy+th/2+S(22),12,game.holdActive?C.red:C.darkBlue,'center',true);
+  drawText(`${Math.floor(game.holdProgress*100)}%`,cx,cy,18,C.darkBlue,'center',true);
+}
+
+function renderTimingGame(a,s){
+  const cx=a.x+a.w/2,cy=a.y+a.h*0.6;
+  const bw=a.w-S(40),bx=a.x+S(20);
+  if(!game.timingHit){
+    drawRoundRect(bx,cy-S(15),bw,S(30),S(10),'#ddd');
+    const gw=bw*0.2,gx=bx+bw/2-gw/2;
+    drawRoundRect(gx,cy-S(15),gw,S(30),S(5),C.green);
+    const yw=bw*0.15;
+    drawRoundRect(gx-yw,cy-S(15),yw,S(30),S(3),C.gold);
+    drawRoundRect(gx+gw,cy-S(15),yw,S(30),S(3),C.gold);
+    const px=bx+bw*game.timingPos;
+    ctx.fillStyle=C.red;ctx.beginPath();ctx.arc(px,cy,S(12),0,Math.PI*2);ctx.fill();
+    drawText('🎯',px,cy,14,C.white);
+    drawText('Нажми в зелёной зоне!',cx,cy+S(35),11,C.darkBlue);
+  } else {
+    drawText('✅ Отлично!',cx,cy,24,C.green,'center',true);
+  }
+}
+
+function updatePlaying(dt){
+  // Анимация гостя
+  if(game.guestVisible && game.guestEnterAnim<1) game.guestEnterAnim+=dt*2;
+
+  game.orderTimer-=dt;
+  if(game.orderTimer<=0){
+    game.orderTimer=0;sfxFail();game.furinaEmotion='sad';
+    game.guestVisible=false;
+    showDialog(['⏰ Время вышло!',`${game.currentClient.emoji} ${pick(game.currentClient.sad)}`,'Фурина: Ой-ой...'],()=>{nextOrder();});
+    return;
+  }
+  game.stepTimer-=dt;
+  if(game.stepTimer<=0){
+    sfxFail();game.currentStep++;
+    if(game.currentStep<game.currentRecipe.steps.length)startStep();else finishOrder();return;
+  }
+  const step=game.currentRecipe.steps[game.currentStep];
+  if(step.type==='tap'){
+    if(game.tapCount>=step.target){
+      sfxPerfect();spawnParticles(W/2,H*0.5,C.green,8);
+      game.currentStep++;
+      if(game.currentStep<game.currentRecipe.steps.length)startStep();else finishOrder();
+    }
+  }else if(step.type==='hold'){
+    if(game.holdActive){game.holdProgress+=dt/step.duration;
+      if(game.holdProgress>=1){game.holdProgress=1;sfxPerfect();spawnParticles(W/2,H*0.5,C.green,8);
+        game.currentStep++;
+        if(game.currentStep<game.currentRecipe.steps.length)startStep();else finishOrder();
+      }
+    }else game.holdProgress=Math.max(0,game.holdProgress-dt*0.3);
+  }else if(step.type==='timing'){
+    if(!game.timingHit){
+      const sp=1.2+game.currentRecipe.difficulty*0.3;
+      game.timingPos+=game.timingDir*sp*dt;
+      if(game.timingPos>=1){game.timingPos=1;game.timingDir=-1;}
+      if(game.timingPos<=0){game.timingPos=0;game.timingDir=1;}
+    }
+  }
+  for(let i=0;i<3;i++)if(game.helperCooldowns[i]>0)game.helperCooldowns[i]-=dt;
+}
+
+function handlePlaying(tx,ty){
+  const step=game.currentRecipe.steps[game.currentStep];
+  // Помощники
+  const hy=H*0.68;
+  for(let i=0;i<3;i++){
+    const hx=S(10)+i*(W/3),hw=W/3-S(8);
+    if(tx>=hx&&tx<=hx+hw&&ty>=hy&&ty<=hy+S(55)){
+      if(game.helperCooldowns[i]<=0){
+        game.helperCooldowns[i]=15;sfxGood();
+        spawnParticles(hx+hw/2,hy,C.lightBlue,6);
+        spawnFloatingText(hx+hw/2,hy-S(10),FURINA_QUOTES.helper[i],C.lightBlue);
+        if(i===0)game.tapCount=Math.min(game.tapCount+3,step?step.target:99);
+        else if(i===1){game.orderTimer=Math.min(game.orderTimer+5,game.orderMaxTime);spawnFloatingText(W/2,H*0.15,'+5с ⏰',C.green);}
+        else if(i===2)game.holdProgress=Math.min(game.holdProgress+0.4,1);
+      }return;
+    }
+  }
+  if(!step)return;
+  if(step.type==='tap'){game.tapCount++;sfxTap();spawnParticles(tx,ty,C.blue,3);spawnFloatingText(tx,ty-S(20),'+1',C.blue);}
+  else if(step.type==='timing'){
+    if(!game.timingHit){
+      game.timingHit=true;const d=Math.abs(game.timingPos-0.5);
+      if(d<0.1){sfxPerfect();spawnParticles(W/2,H*0.5,C.green,12);spawnFloatingText(W/2,H*0.45,'PERFECT!',C.green);game.stepScore=100;}
+      else if(d<0.2){sfxGood();spawnParticles(W/2,H*0.5,C.gold,8);spawnFloatingText(W/2,H*0.45,'GREAT!',C.gold);game.stepScore=70;}
+      else{sfxFail();spawnFloatingText(W/2,H*0.45,'MISS...',C.red);game.stepScore=30;game.shakeTimer=0.3;}
+      setTimeout(()=>{if(game.state!==ST.PLAYING)return;game.currentStep++;
+        if(game.currentStep<game.currentRecipe.steps.length)startStep();else finishOrder();
+      },600);
+    }
+  }
+}
+
+// ============================================================
+//  ГЛАВНЫЙ ЦИКЛ
+// ============================================================
+let lastTime=0;
+function gameLoop(ts){
+  const dt=Math.min((ts-lastTime)/1000,0.05);lastTime=ts;game.time+=dt;
+  if(game.state===ST.PLAYING)updatePlaying(dt);
+  updateParticles(dt);
+  if(game.shakeTimer>0)game.shakeTimer-=dt;
+  ctx.save();
+  if(game.shakeTimer>0)ctx.translate(rand(-3,3)*SCALE,rand(-3,3)*SCALE);
+  game.buttons=[];
+  switch(game.state){
+    case ST.MENU:renderMenu();break;
+    case ST.TUTORIAL:renderTutorial();break;
+    case ST.DIALOG:renderDialog();break;
+    case ST.PLAYING:renderPlaying();break;
+    case ST.DAY_RESULT:renderDayResult();break;
+    case ST.SHOP:renderShop();break;
+  }
+  drawParticles();ctx.restore();
+  requestAnimationFrame(gameLoop);
+}
+
+// ============================================================
+//  ВВОД
+// ============================================================
+function getPos(e){
+  const r=canvas.getBoundingClientRect();const t=e.touches?e.touches[0]:e;
+  return{x:(t.clientX-r.left)*(canvas.width/r.width),y:(t.clientY-r.top)*(canvas.height/r.height)};
+}
+canvas.addEventListener('touchstart',(e)=>{
+  e.preventDefault();initAudio();const p=getPos(e);handleInput(p.x,p.y);
+  if(game.state===ST.PLAYING){const s=game.currentRecipe?game.currentRecipe.steps[game.currentStep]:null;if(s&&s.type==='hold')game.holdActive=true;}
+},{passive:false});
+canvas.addEventListener('touchend',(e)=>{e.preventDefault();game.holdActive=false;},{passive:false});
+canvas.addEventListener('mousedown',(e)=>{
+  initAudio();const p=getPos(e);handleInput(p.x,p.y);
+  if(game.state===ST.PLAYING){const s=game.currentRecipe?game.currentRecipe.steps[game.currentStep]:null;if(s&&s.type==='hold')game.holdActive=true;}
+});
+canvas.addEventListener('mouseup',()=>{game.holdActive=false;});
+
+function handleInput(tx,ty){
+  switch(game.state){
+    case ST.MENU:handleMenu(tx,ty);break;
+    case ST.TUTORIAL:handleTutorial(tx,ty);break;
+    case ST.DIALOG:handleDialog();break;
+    case ST.PLAYING:handlePlaying(tx,ty);break;
+    case ST.DAY_RESULT:handleDayResult(tx,ty);break;
+    case ST.SHOP:handleShop(tx,ty);break;
+  }
+}
+
+// ============================================================
+//  СТАРТ
+// ============================================================
+game.hasSave=loadGame();
+requestAnimationFrame(gameLoop);
+</script>
+</body>
+</html>
